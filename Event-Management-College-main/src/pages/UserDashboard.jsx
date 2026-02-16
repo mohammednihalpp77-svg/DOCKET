@@ -1,8 +1,9 @@
 import axios from "axios";
 import { useAppContext } from "../context/AppContext";
-import { useState } from "react";
-import { useEffect } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { toast } from "react-toastify";
+import { FaMapMarkerAlt, FaSync } from "react-icons/fa";
 
 const API_BASE_URL = "http://localhost:5000/api";
 
@@ -23,11 +24,62 @@ const UserDashboard = () => {
   /* New State for Attendance Modal */
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
+  /* New States for Geolocation */
+  const [userLocation, setUserLocation] = useState(null);
+  const [locationError, setLocationError] = useState(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+
   useEffect(() => {
     if (user) {
       loadUserData();
+      fetchUserLocation();
     }
   }, [user]);
+
+  const fetchUserLocation = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocation is not supported by your browser.");
+      return;
+    }
+
+    setLocationLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setUserLocation({
+          lat: position.coords.latitude,
+          lng: position.coords.longitude
+        });
+        setLocationError(null);
+        setLocationLoading(false);
+      },
+      (error) => {
+        console.error("Location error:", error);
+        let msg = "Failed to fetch location.";
+        if (error.code === 1) msg = "Location permission denied.";
+        else if (error.code === 2) msg = "Location unavailable.";
+        else if (error.code === 3) msg = "Location timeout.";
+        setLocationError(msg);
+        setLocationLoading(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  };
+
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity;
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // distance in meters
+  };
 
   const loadUserData = async () => {
     try {
@@ -259,18 +311,65 @@ const UserDashboard = () => {
                   <div className="flex gap-2 mt-4">
                     {/* Attendance Button */}
                     {!event.isUpcoming && (
-                      <button
-                        onClick={() => handleAttendance(event.id)}
-                        disabled={event.attended}
-                        className={`flex-1 py-2 rounded-lg font-medium transition ${event.attended
-                          ? 'bg-yellow-600/50 text-white cursor-not-allowed'
-                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          }`}
-                      >
-                        {event.attended
-                          ? (event.attendanceStatus === 'pending' ? 'Pending Approval' : 'Attended ✓')
-                          : 'Mark Attendance'}
-                      </button>
+                      <div className="flex-1 flex flex-col gap-1">
+                        {userLocation ? (
+                          (() => {
+                            const distance = calculateDistance(
+                              userLocation.lat,
+                              userLocation.lng,
+                              event.latitude,
+                              event.longitude
+                            );
+                            const isWithinRange = distance <= 100;
+
+                            return (
+                              <>
+                                <button
+                                  onClick={() => handleAttendance(event.id)}
+                                  disabled={event.attended || !isWithinRange}
+                                  className={`w-full py-2 rounded-lg font-medium transition ${event.attended
+                                    ? 'bg-yellow-600/50 text-white cursor-not-allowed'
+                                    : isWithinRange
+                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                                      : 'bg-gray-600/50 text-gray-400 cursor-not-allowed'
+                                    }`}
+                                >
+                                  {event.attended
+                                    ? (event.attendanceStatus === 'pending' ? 'Pending Approval' : 'Attended ✓')
+                                    : isWithinRange ? 'Mark Attendance' : 'Not at Venue'}
+                                </button>
+                                {!event.attended && (
+                                  <p className={`text-[10px] text-center ${isWithinRange ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                    {isWithinRange
+                                      ? `Within range (${Math.round(distance)}m)`
+                                      : `Too far (${Math.round(distance)}m from venue)`}
+                                  </p>
+                                )}
+                              </>
+                            );
+                          })()
+                        ) : (
+                          <>
+                            <button
+                              disabled
+                              className="w-full py-2 rounded-lg font-medium bg-gray-600/50 text-gray-400 cursor-not-allowed"
+                            >
+                              {locationLoading ? 'Fetching Location...' : 'Location Required'}
+                            </button>
+                            {locationError && (
+                              <p className="text-[10px] text-red-500 text-center">{locationError}</p>
+                            )}
+                            {!locationLoading && (
+                              <button
+                                onClick={fetchUserLocation}
+                                className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center justify-center gap-1 mt-1"
+                              >
+                                <FaSync className={locationLoading ? 'animate-spin' : ''} /> Retry Location
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     )}
 
                     {/* Rating Button */}
